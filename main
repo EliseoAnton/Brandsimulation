@@ -1,0 +1,579 @@
+
+import pygame
+import math
+import numpy as np
+import pygame_gui
+from pygame_gui.elements.ui_text_entry_line import UITextEntryLine
+
+pygame.init()
+pygame.display.init()
+pygame.font.init()
+#Farben
+ORANGE = (255, 140, 0)
+ROT = (255, 0, 0)
+GRUEN = (0, 255, 0)
+SCHWARZ = (0, 0, 0)
+WEISS = (255, 255, 255)
+BLAU = (0, 0, 255)
+GELB = (255, 255, 0)
+LILA = (127, 0, 255)
+DUNKELGRAU = (128, 128, 128)
+HELLGRAU = (211, 211, 211)
+
+#grundlegende Variablen
+class Environment:
+    def __init__(self):
+        self.checkpointList = []
+        self.areaList = []
+        self.floorList = []
+        self.lineList = []
+        self.textList = []
+        self.groupList = []
+        self.animPlaying = False
+        self.distanceLimit = 10
+        self.tooNearPersonsTolerance = 1
+        self.normalPersonSpeed = 0.4
+        self.listOfobjectLists = [self.checkpointList, self.areaList, self.floorList, self.lineList, self.textList,
+                                  self.groupList]
+        self.chronologicalOrder = []
+        self.buttonList = [modeButton, undoButton, startAnimationButton]
+        self.locationHustleList = []
+        self.startTime = 0
+        self.showAnimTime = Area(780, 80, 950, 140, HELLGRAU)
+    #fürs undo immer Reihenfolge speichern
+    def appendToObjectList(self, objectList, object):
+        objectList.append(object)
+        self.chronologicalOrder.append(object)
+    #timer und Variablen, die für die Animation gebraucht werden zurücksetzen
+    def resetForAnimation(self):
+        self.animPlaying = True
+        self.startTime = pygame.time.get_ticks()
+        for group in self.groupList:
+            for person in group.personList:
+                person.t= 1
+                #passedCheckpoints um zu sehen welche Route eine Person einschlagen muss
+                person.passedCheckpointsNumber = 0
+                person.finished = False
+                person.Started = False
+
+# Personen Bewegen sich nacheinander entlang der Vektoren
+    def updateAllPersons(self):
+        timeSinceEnter = pygame.time.get_ticks() - self.startTime
+        self.showAnimTime.text = 'Zeit: ' + str(timeSinceEnter/1000)+ " sek."
+        #geht jede person jeder gruppe durch und guckt ob sie sich bewegen dürfen
+        for group in self.groupList:
+            for i in range(len(group.personList)):
+                person = group.personList[i]
+                go = True
+                person.countClosePersons(environment1.tooNearPersonsTolerance)
+                if i != 0:
+                    distanceToPreviousPerson = person.calcDistance(group.personList[i-1].x, group.personList[i-1].y)
+                    if distanceToPreviousPerson <= self.distanceLimit+1 and not group.personList[i-1].finished:
+                        go = False
+
+                if go and not person.finished:
+                    if [person.x,person.y] == [group.checkpointRoute[0].x, group.checkpointRoute[0].y]:
+                        print("started")
+                        person.started = True
+
+                    person.t+=person.speed
+                    person.x = group.routeVektorsList[person.passedCheckpointsNumber][0][0] + person.t * group.routeVektorsList[person.passedCheckpointsNumber][1][0]
+                    person.y = group.routeVektorsList[person.passedCheckpointsNumber][0][1] + person.t * group.routeVektorsList[person.passedCheckpointsNumber][1][1]
+
+                    if round(person.x, 0) == group.checkpointRoute[person.passedCheckpointsNumber+1].x and round(person.y, 0) == group.checkpointRoute[person.passedCheckpointsNumber+1].y:
+                        person.passedCheckpointsNumber += 1
+                        person.t = 0
+                        if person.passedCheckpointsNumber == len(group.checkpointRoute)-1:
+                            print("angekommen")
+                            person.finished = True
+
+                            if i == len(group.personList)-1:
+                                allFinished = True
+                                for group2 in self.groupList:
+                                    if not group2.personList[-1].finished:
+                                        allFinished = False
+                                if allFinished:
+                                    print("Alle Personen sind angekommen")
+                                    environment1.animPlaying = False
+                                    startAnimationButton.text = "Animation starten"
+                                    modeIndex = 3
+
+                person.display()
+
+    def undo(self):
+        if len(self.chronologicalOrder) > 0 and type(self.chronologicalOrder[-1]) != Group:
+            for lst in self.listOfobjectLists:
+                if len(lst) > 0:
+                    if lst[-1] == self.chronologicalOrder[-1]:
+                        print("Object deleted")
+                        del lst[-1]
+                        del self.chronologicalOrder[-1]
+                        break
+
+
+
+
+
+#grüne Flächen
+class Area:
+    def __init__(self, x1, y1, x2, y2, color):
+        self.x1 = min(x1, x2)
+        self.y1 = min(y1, y2)
+        self.x2 = max(x1, x2)
+        self.y2 = max(y1, y2)
+        self.color = color
+        self.text = ""
+
+    def display(self):
+        pygame.draw.rect(window1.screen, self.color, (self.x1, self.y1, (self.x2 - self.x1), (self.y2 - self.y1)))
+        if self.text != "":
+            self.displayText(self.text)
+
+    def isClicked(self, clickX, clickY):
+        if self.x1 < clickX < self.x2 and self.y1 < clickY < self.y2:
+            return True
+        else:
+            return False
+
+    def displayText(self, text):
+        # print(text)
+        text = myfont.render(text, True, (255, 255, 100))
+        window1.screen.blit(text,
+                            (int(self.x1 + (self.x2 - self.x1) / 2) - len(self.text) * 5, int(self.y1 + (self.y2 - self.y1) / 2) - 15))
+
+class Window:
+    def __init__(self, screensize, title):
+        self.screensize = (screensize, screensize)
+        self.backgroundColor = DUNKELGRAU
+        self.gridColor = HELLGRAU
+        self.title = title
+        self.grid = []
+        self.display()
+        self.scale = 20
+        self.createGrid(3.2)
+
+    def display(self):
+        self.screen = pygame.display.set_mode(self.screensize)
+        pygame.display.set_caption(self.title)
+#hintergrund Gitter
+    def createGrid(self, margin):
+        for column in range(43):
+            for row in range(43):
+                self.grid.append((((margin + (row * self.scale) + row * margin), (column * self.scale + column * margin + margin),
+                                  (margin + (row * self.scale) + row * margin + self.scale),
+                                  (column * self.scale + column * margin + margin + self.scale)), self.gridColor, self.gridColor))
+
+
+    def drawGrid(self):
+        self.screen.fill(self.backgroundColor)
+        for square in self.grid:
+            pygame.draw.rect(self.screen, square[1], (square[0][0], square[0][1], self.scale, self.scale))
+
+#stellt dar, wo am meisten Gedrängel war(geht noch nicht)
+    def drawHeatmap(self):
+        print("hearmap")
+        for square in self.grid:
+            for hustleLocation in environment1.locationHustleList:
+                print(hustleLocation)
+                if square[0][0] <= hustleLocation[0] <= square[0][2] and square[0][1] <= hustleLocation[1] <= square[0][2]:
+                    square[2]+=1
+                print(square[1])
+                print(square)
+                square[1] = [square[2]*10, 0, 0]
+
+
+window1 = Window(1000, "Simulation")
+
+class Checkpoint:
+    def __init__(self, x, y, size, thickness):
+        self.x = x
+        self.y = y
+        self.size = size
+        self.colour = ROT
+        self.thickness = thickness
+
+    def display(self):
+        pygame.draw.circle(window1.screen, self.colour, (self.x, self.y), self.size, self.thickness)
+
+    def isClicked(self, clickX, clickY):
+        if (self.x - self.size / 2) - 5 < clickX < (self.x + self.size / 2) + 5 and (
+                self.y - self.size / 2) - 5 < clickY < (self.y + self.size / 2) + 5:
+            return True
+        else:
+            return False
+
+class TextInput():
+    def __init__(self, x1, y1, x2, y2, color):
+        self.x1 = min(x1, x2)
+        self.y1 = min(y1, y2)
+        self.x2 = max(x1, x2)
+        self.y2 = max(y1, y2)
+
+
+class Floor:
+    def __init__(self, x1, y1, x2, y2, color):
+        self.x1 = min(x1, x2)
+        self.y1 = min(y1, y2)
+        self.x2 = max(x1, x2)
+        self.y2 = max(y1, y2)
+        self.color = color
+
+    def display(self):
+        pygame.draw.rect(window1.screen, self.color, (self.x1, self.y1, (self.x2 - self.x1), (self.y2 - self.y1)))
+
+#alle person die einem Raum zugeordet werden in einer Liste personList
+class Group:
+    def __init__(self, name):
+        self.name = name
+        self.startArea = None
+        self.endArea = None
+        self.checkpointRoute = []
+        self.routeVektorsList = np.array([])
+        self.numberOfPersons = 5
+        self.personList = []
+
+    def createPersonList(self):
+        for i in range(self.numberOfPersons):
+            self.personList.append(Person(self.checkpointRoute[0].x, self.checkpointRoute[0].y))
+
+
+    def setStartArea(self, inputArea):
+        self.startArea = inputArea
+
+    def setEndArea(self, inputArea):
+        self.endArea = inputArea
+
+    def addToCheckpointRoute(self, ClickedCheckpoint):
+        self.checkpointRoute.append(ClickedCheckpoint)
+    #mit numpy kann man besser listen als vektoren benutzen
+    def createRouteVektors(self):
+        for i in range(len(self.checkpointRoute)-1):
+            directionVectorX = (self.checkpointRoute[i + 1].x - self.checkpointRoute[i].x)
+            directionVectorY = (self.checkpointRoute[i + 1].y - self.checkpointRoute[i].y)
+            normalizedDirectionVectorX = directionVectorX/np.sqrt((np.power(directionVectorX, 2)+np.power(directionVectorY, 2)))
+            normalizedDirectionVectorY = directionVectorY/np.sqrt((np.power(directionVectorX, 2)+np.power(directionVectorY, 2)))
+            newElement = np.array([self.checkpointRoute[i].x, self.checkpointRoute[i].y,
+                      normalizedDirectionVectorX,
+                       normalizedDirectionVectorY])
+            newElement = newElement.reshape(1, 2, 2)
+            if i == 0:
+                self.routeVektorsList = newElement
+            else:
+                self.routeVektorsList = np.concatenate((self.routeVektorsList, newElement))
+
+    def printRoute(self):
+        print("\n----------------------\n",
+              "GroupName:  ", self.name,
+              "\n startArea: (", self.startArea.x1, ",", self.startArea.y1, ")  - (", self.startArea.x2, ",",
+              self.startArea.y2, ")",
+              "\n checkpointRoute: ", [(checkpoint.x, checkpoint.y) for checkpoint in self.checkpointRoute],
+              "\n endArea: (", self.endArea.x1, ",", self.endArea.y1, ")  - (", self.endArea.x2, ",", self.endArea.y2,
+              ")\n",
+              "----------------------\n")
+
+#gelbe Linie
+class Line:
+    def __init__(self, checkpoint1, checkpoint2, color, width):
+        self.checkpoint1 = checkpoint1
+        self.checkpoint2 = checkpoint2
+        self.color = color
+        self.width = width
+
+    def display(self):
+        pygame.draw.line(window1.screen, self.color, self.checkpoint1, self.checkpoint2, self.width)
+
+
+class Button:
+    def __init__(self, x1, y1, x2, y2, color):
+        self.x1 = min(x1, x2)
+        self.y1 = min(y1, y2)
+        self.x2 = max(x1, x2)
+        self.y2 = max(y1, y2)
+        self.color = color
+        self.text = " "
+
+    def display(self):
+        pygame.draw.rect(window1.screen, self.color, (self.x1, self.y1, (self.x2 - self.x1), (self.y2 - self.y1)))
+        if self.text != "":
+            self.displayText(self.text)
+
+    def isClicked(self, clickX, clickY):
+        if self.x1 < clickX < self.x2 and self.y1 < clickY < self.y2:
+            return True
+
+    def displayText(self, text):
+        # print(text)
+        text = myfont.render(self.text, True, (0, 0, 0))
+        window1.screen.blit(text, (
+            int(self.x1 + (self.x2 - self.x1) / 2) - len(self.text) * 5, int(self.y1 + (self.y2 - self.y1) / 2) - 15))
+
+
+class Person:
+    def __init__(self, x, y):
+        self.color = GRUEN
+        self.tooClose = 0
+        self.x = x
+        self.y = y
+        self.t = 0
+        self.speed = 0.2
+        self.thickness = 2
+        self.size = 5
+        self.passedCheckpointsNumber = 0
+        self.finished = False
+        self.started = False
+
+    def display(self):
+        pygame.draw.circle(window1.screen, self.color, (self.x, self.y), self.size, self.thickness)
+    def calcDistance(self, x, y):
+        return np.sqrt(np.power((x - self.x), 2) + np.power((y - self.y), 2))
+    def countClosePersons(self, tolerance):
+        self.tooClose = 0
+        for group in environment1.groupList:
+            for person in group.personList:
+                distance = self.calcDistance(person.x, person.y)
+                if person != self and distance <= environment1.distanceLimit and not person.finished and person.started:
+                    self.tooClose += 1
+                    environment1.locationHustleList.append([self.x, self.y])
+        if self.tooClose > tolerance:
+            self.color = ROT
+            self.speed = environment1.normalPersonSpeed / 2
+        else:
+            self.color = GRUEN
+            self.speed = environment1.normalPersonSpeed
+
+
+
+clock = pygame.time.Clock()
+clock.tick(10)
+
+# font used for the text
+myfont = pygame.font.SysFont('Comic Sans MS', 20)
+
+modes = [("Checkpoints", ROT), ("Flächen", GRUEN), ("Flure", BLAU), ("Wege", GELB)]
+modeIndex = 0
+
+modeButton = Button(50, 27, 207, 68, ROT)
+modeButton.text = modes[modeIndex][0]
+
+undoButton = Button(800, 27, 900, 68, ORANGE)
+undoButton.text = "zurück"
+
+startAnimationButton = Button(400, 27, 600, 68, LILA)
+startAnimationButton.text = "Animation starten"
+
+pointBufferArea = (None, None)
+pointBufferLine = (None, None)
+pointBufferFloor = (None, None)
+SelectedGroup = False
+
+spielaktiv = True
+animAreaActive = False
+animFloorActive = False
+animCheckpoint = True
+
+environment1 = Environment()
+
+# Schleife Hauptprogramm
+while spielaktiv:
+    window1.drawGrid()
+    for event in pygame.event.get():
+        pos = pygame.mouse.get_pos()
+        if event.type == pygame.QUIT:
+            spielaktiv = False
+            print("Spieler hat Quit-Button angeklickt")
+
+        # ------------------------check Mousecklick and safe mouse position----------------------------------
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if startAnimationButton.isClicked(pos[0], pos[1]):
+                if not environment1.animPlaying:
+                    startAnimationButton.text="Animation stoppen"
+                    print("\n-------------------\nAnimation starts ")
+                    environment1.resetForAnimation()
+                    modeIndex = 4
+                else:
+                    environment1.animPlaying = False
+                    startAnimationButton.text = "Animation starten"
+                    modeIndex = 3
+
+            # if changeModeButton was cklicked: switch to next mode
+            if modeButton.isClicked(pos[0], pos[1]):
+                if modeIndex == len(modes) - 1:
+                    modeIndex = 0
+                    animCheckpoint = True
+                else:
+                    modeIndex += 1
+                    animCheckpoint = False
+                modeButton.color = modes[modeIndex][1]
+                modeButton.text = modes[modeIndex][0]
+
+            elif undoButton.isClicked(pos[0], pos[1]):
+                print("\n-------------------\nfunction undo")
+                environment1.undo()
+
+            # ------------------------drawCheckpoints----------------------------------
+            elif modeIndex == 0:
+                newCheckpoint = Checkpoint(pos[0], pos[1], 10, 4)
+                environment1.appendToObjectList(environment1.checkpointList, newCheckpoint)
+                print("new checkpoint at position: ",
+                      (environment1.checkpointList[-1].x, environment1.checkpointList[-1].y))
+
+                newCheckpoint.display()
+
+            # ------------------------draw Areas-----------------------------------------
+            elif modeIndex == 1:
+                if pointBufferArea != (None, None):
+                    newArea = Area(pointBufferArea[0], pointBufferArea[1], pos[0], pos[1], modes[modeIndex][1])
+                    newArea.display()
+                    environment1.appendToObjectList(environment1.areaList, newArea)
+
+                    pointBufferArea = (None, None)
+                    animAreaActive = False
+
+                else:
+                    pointBufferArea = pos
+                    animAreaActive = True
+
+            # ------------------------drawFloors----------------------------------------
+            elif modeIndex == 2:
+                if pointBufferFloor != (None, None):
+                    newFloor = Floor(pointBufferFloor[0], pointBufferFloor[1], pos[0], pos[1], modes[modeIndex][1])
+                    newFloor.display()
+                    pointBufferFloor = (None, None)
+                    animFloorActive = False
+                    environment1.appendToObjectList(environment1.floorList, newFloor)
+                else:
+                    pointBufferFloor = pos
+                    animFloorActive = True
+
+            # -----------choose start area draw Lines chose end area-----------------------
+            elif modeIndex == 3:
+                # check if startArea was chosen already-------------
+                if not SelectedGroup:
+                    selectedArea = False
+                    for area in environment1.areaList:
+                        if area.isClicked(pos[0], pos[1]):
+                            print("area is selected")
+                            # newGroup = Group(input("Please write the name of the group: "))
+                            groupIndex = len(environment1.groupList)+1
+                            newGroup = Group("Gruppe " +str(groupIndex))
+                            area.text = newGroup.name
+                            # area.displayText(newGroup.name)
+                            newGroup.setStartArea(area)
+                            SelectedGroup = newGroup
+                            selectedArea = True
+                            break
+                    if not selectedArea:
+                        print("couldn't select area")
+
+                else:
+                    checkpointClicked = False
+                    # else(if Area was Checked): check if checkpoint was checked
+                    for checkpoint in environment1.checkpointList:
+                        if checkpoint.isClicked(pos[0], pos[1]):
+                            print("checkpoint selected: ", checkpoint.x, checkpoint.y)
+                            checkpointClicked = True
+                            SelectedGroup.addToCheckpointRoute(checkpoint)
+                            if pointBufferLine != (None, None):
+                                newLine = Line(pointBufferLine, (checkpoint.x, checkpoint.y), GELB, 5)
+                                environment1.appendToObjectList(environment1.lineList, newLine)
+                                newLine.display()
+                            pointBufferLine = (checkpoint.x, checkpoint.y)
+                            break
+                        else:
+                            print("not checkpoint: ", checkpoint.x, checkpoint.y)
+
+                    # if no checkpoint was clicked: check if endArea was Clicked
+                    if not checkpointClicked:
+                        i = 0
+                        for area in environment1.areaList:
+                            i += 1
+                            if area.isClicked(pos[0], pos[1]) and area != SelectedGroup.startArea:
+                                print("endArea is selected")
+                                SelectedGroup.setEndArea(area)
+                                pointBuffer = (None, None)
+                                pointBufferLine = (None, None)
+                                area.text = "Sammelplatz für " + str(SelectedGroup.name)
+
+                                SelectedGroup.printRoute()
+                                SelectedGroup.createPersonList()
+                                environment1.appendToObjectList(environment1.groupList, SelectedGroup)
+                                SelectedGroup.createRouteVektors()
+                                SelectedGroup = False
+                                break
+                            else:
+                                print("no endearea selected")
+
+        elif modeIndex == 1:
+            try:
+                if pointBufferArea != (None, None):
+                    animArea = Area(pointBufferArea[0], pointBufferArea[1], pos[0], pos[1], modes[modeIndex][1])
+                    animArea.display()
+            except:
+                pass
+
+        elif modeIndex == 2:
+
+            if pointBufferFloor != (None, None):
+                animFloor = Floor(pointBufferFloor[0], pointBufferFloor[1], pos[0], pos[1], modes[modeIndex][1])
+                animFloor.display()
+            else:
+                for i in range(len(window1.grid)):
+                    square = window1.grid[i]
+                    if square[0][0] < pos[0] < square[0][2] and square[0][1] < pos[1] < square[0][3]:
+                        for i2 in range(len(window1.grid)):
+                            window1.grid[i2] = window1.grid[i2][0], HELLGRAU
+                        window1.grid[i] = square[0], LILA
+                        break
+        else:
+            pass
+
+    if animCheckpoint != False:
+        Checkpoint(pos[0], pos[1], 5, 2).display()
+
+    for floor in environment1.floorList:
+        floor.display()
+
+    for area in environment1.areaList:
+        area.display()
+
+    if len(environment1.chronologicalOrder) > 0:
+        if type(environment1.chronologicalOrder[-1]) != Group:
+            undoButton.color = ORANGE
+            startAnimationButton.color = HELLGRAU
+        else:
+            undoButton.color = HELLGRAU
+            if len(environment1.groupList)>0:
+                startAnimationButton.color = LILA
+            else:
+                startAnimationButton.color = HELLGRAU
+    else:
+        undoButton.color = HELLGRAU
+        startAnimationButton.color = HELLGRAU
+
+    for button in environment1.buttonList:
+        button.display()
+    for checkpoint in environment1.checkpointList:
+        checkpoint.display()
+    for line in environment1.lineList:
+        line.display()
+
+    if animAreaActive:
+        try:
+            animArea.display()
+        except:
+            pass
+    if animFloorActive:
+        try:
+            animFloor.display()
+        except:
+            pass
+    if environment1.animPlaying:
+        environment1.updateAllPersons()
+        print(type(environment1.showAnimTime))
+
+    #window1.drawHeatmap()
+    environment1.showAnimTime.display()
+    pygame.display.flip()
+    # sh-Zeiten festlegen
+    clock.tick(60)
+pygame.quit()
